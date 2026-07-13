@@ -6,7 +6,7 @@ Self-hosted monitoring for one residential SunPower PVS6 site: safe collection, 
 
 ## Current phase
 
-**Phase 2 — collector + discovery.** `services/collector` implements `PvsDataSource` with varserver and fixture adapters. Database/API/UI not started.
+**Phase 4 — PWA.** Nginx serves the React app on port **3080** and proxies `/api` to FastAPI.
 
 ### Build 61846 query shapes
 

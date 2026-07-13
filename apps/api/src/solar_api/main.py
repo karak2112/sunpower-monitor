@@ -1,0 +1,227 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from typing import Annotated, Any
+
+import asyncpg
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from solar_store.repository import Repository
+
+
+class ApiSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=(".env", "../../.env"), extra="ignore")
+
+    database_url: str = "postgresql://solar:change-me-locally@127.0.0.1:5432/solar_monitor"
+    api_auth_token: str = ""
+    cors_origins: str = "*"
+
+
+settings = ApiSettings()
+app = FastAPI(title="Solar Monitor API", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in settings.cors_origins.split(",")],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+_pool: asyncpg.Pool | None = None
+
+
+async def get_pool() -> asyncpg.Pool:
+    if _pool is None:
+        raise HTTPException(status_code=503, detail="database pool not ready")
+    return _pool
+
+
+async def get_repo(pool: Annotated[asyncpg.Pool, Depends(get_pool)]) -> Repository:
+    return Repository(pool)
+
+
+def require_auth(authorization: Annotated[str | None, Header()] = None) -> None:
+    token = settings.api_auth_token.strip()
+    if not token:
+        return
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="missing bearer token")
+    if authorization.removeprefix("Bearer ").strip() != token:
+        raise HTTPException(status_code=403, detail="invalid token")
+
+
+@app.on_event("startup")
+async def startup() -> None:
+    global _pool
+    _pool = await asyncpg.create_pool(settings.database_url, min_size=1, max_size=5)
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    global _pool
+    if _pool is not None:
+        await _pool.close()
+        _pool = None
+
+
+@app.get("/health")
+async def health(repo: Annotated[Repository, Depends(get_repo)]) -> dict[str, Any]:
+    data = await repo.health()
+    data["service"] = "solar-api"
+    data["status"] = "ok" if data.get("database_ok") else "degraded"
+    return data
+
+
+@app.get("/ready")
+async def ready(pool: Annotated[asyncpg.Pool, Depends(get_pool)]) -> dict[str, str]:
+    async with pool.acquire() as conn:
+        await conn.fetchval("SELECT 1")
+    return {"status": "ready"}
+
+
+@app.get("/v1/current", dependencies=[Depends(require_auth)])
+async def current(repo: Annotated[Repository, Depends(get_repo)]) -> dict[str, Any]:
+    overview = await repo.current_overview()
+    # JSON-serialize datetimes
+    def conv(obj: Any) -> Any:
+        if isinstance(obj, list):
+            return [conv(x) for x in obj]
+        if isinstance(obj, dict):
+            return {k: conv(v) for k, v in obj.items()}
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return obj
+
+    return conv(overview)
+
+
+@app.get("/v1/devices", dependencies=[Depends(require_auth)])
+async def devices(repo: Annotated[Repository, Depends(get_repo)]) -> dict[str, Any]:
+    rows = await repo.devices()
+
+    def conv(obj: Any) -> Any:
+        if isinstance(obj, list):
+            return [conv(x) for x in obj]
+        if isinstance(obj, dict):
+            return {k: conv(v) for k, v in obj.items()}
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return obj
+
+    return {"devices": conv(rows)}
+
+
+class DeviceLayoutUpdate(BaseModel):
+    grid_row: int | None = Field(default=None, ge=0, le=50)
+    grid_col: int | None = Field(default=None, ge=0, le=50)
+    name: str | None = Field(default=None, max_length=80)
+
+
+@app.patch("/v1/devices/{device_id}/layout", dependencies=[Depends(require_auth)])
+async def patch_device_layout(
+    device_id: str,
+    body: DeviceLayoutUpdate,
+    repo: Annotated[Repository, Depends(get_repo)],
+) -> dict[str, Any]:
+    if body.grid_row is None and body.grid_col is None and body.name is None:
+        raise HTTPException(status_code=400, detail="no layout fields provided")
+    row = await repo.update_device_layout(
+        device_id,
+        grid_row=body.grid_row,
+        grid_col=body.grid_col,
+        name=body.name,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="inverter not found")
+
+    def conv(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            return {k: conv(v) for k, v in obj.items()}
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return obj
+
+    return {"device": conv(row)}
+
+
+@app.get("/v1/history", dependencies=[Depends(require_auth)])
+async def history(
+    repo: Annotated[Repository, Depends(get_repo)],
+    metric: str = Query(..., min_length=1, max_length=64),
+    device_type: str | None = Query(None),
+    pvs_path_id: str | None = Query(None),
+    hours: int = Query(24, ge=1, le=24 * 90),
+    limit: int = Query(5000, ge=1, le=20000),
+) -> dict[str, Any]:
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(hours=hours)
+    rows = await repo.history(
+        metric=metric,
+        device_type=device_type,
+        pvs_path_id=pvs_path_id,
+        start=start,
+        end=end,
+        limit=limit,
+    )
+
+    def conv(obj: Any) -> Any:
+        if isinstance(obj, list):
+            return [conv(x) for x in obj]
+        if isinstance(obj, dict):
+            return {k: conv(v) for k, v in obj.items()}
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return obj
+
+    return {
+        "metric": metric,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "count": len(rows),
+        "points": conv(rows),
+    }
+
+
+@app.get("/v1/export.csv", dependencies=[Depends(require_auth)])
+async def export_csv(
+    repo: Annotated[Repository, Depends(get_repo)],
+    metric: str = Query("pv_power_kw"),
+    device_type: str | None = Query("site"),
+    pvs_path_id: str | None = Query("livedata"),
+    hours: int = Query(24, ge=1, le=24 * 365),
+) -> Response:
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(hours=hours)
+    rows = await repo.history(
+        metric=metric,
+        device_type=device_type,
+        pvs_path_id=pvs_path_id,
+        start=start,
+        end=end,
+        limit=20000,
+    )
+    lines = ["time,device_type,pvs_path_id,metric,value,unit,quality,source"]
+    for r in rows:
+        lines.append(
+            ",".join(
+                [
+                    r["time"].isoformat(),
+                    str(r["device_type"]),
+                    str(r["pvs_path_id"]),
+                    metric,
+                    str(r["value"]),
+                    str(r["unit"]),
+                    str(r["quality"]),
+                    str(r["source"]),
+                ]
+            )
+        )
+    body = "\n".join(lines) + "\n"
+    return Response(
+        content=body,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=solar-export.csv"},
+    )

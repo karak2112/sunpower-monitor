@@ -96,7 +96,11 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (init?.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers,
+    cache: "no-store",
+  });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`${res.status} ${res.statusText}: ${text}`);
@@ -104,10 +108,42 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export type DaySummary = {
+  timezone: string;
+  local_date: string;
+  window_start: string;
+  window_end: string;
+  generated_kwh: number | null;
+  generated_insufficient_samples: boolean;
+  grid_kwh: number | null;
+  grid_direction: "export" | "import" | "neutral" | null;
+  grid_insufficient_samples: boolean;
+  home_load_kwh: number | null;
+  home_load_insufficient_samples: boolean;
+  quality: string;
+  method: string;
+};
+
+export type PlaybackResponse = {
+  start: string;
+  end: string;
+  frame_count: number;
+  max_kw: number;
+  devices: Array<{
+    pvs_path_id: string;
+    name: string | null;
+    grid_row: number | null;
+    grid_col: number | null;
+  }>;
+  frames: Array<{ time: string; powers: Record<string, number> }>;
+};
+
 export const api = {
   health: () => apiFetch<HealthResponse>("/health"),
   current: () => apiFetch<CurrentResponse>("/v1/current"),
   devices: () => apiFetch<{ devices: Device[] }>("/v1/devices"),
+  daySummary: () => apiFetch<DaySummary>("/v1/day-summary"),
+  playback: (hours = 24) => apiFetch<PlaybackResponse>(`/v1/playback?hours=${hours}`),
   history: (metric: string, hours = 24) =>
     apiFetch<HistoryResponse>(
       `/v1/history?metric=${encodeURIComponent(metric)}&device_type=site&pvs_path_id=livedata&hours=${hours}`,
@@ -117,8 +153,26 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
-  exportCsvUrl: (hours = 24) =>
-    `${API_BASE}/v1/export.csv?metric=pv_power_kw&device_type=site&pvs_path_id=livedata&hours=${hours}`,
+  async downloadCsv(hours = 24): Promise<void> {
+    const path = `/v1/export.csv?metric=pv_power_kw&device_type=site&pvs_path_id=livedata&hours=${hours}`;
+    const headers = new Headers();
+    const token = getApiToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const res = await fetch(`${API_BASE}${path}`, { headers, cache: "no-store" });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`${res.status} ${res.statusText}: ${text}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `solar-export-${hours}h.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
 };
 
 const CACHE_KEY = "solar_monitor_last_current";

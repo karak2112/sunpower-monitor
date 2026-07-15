@@ -1,9 +1,15 @@
 import { useMemo } from "react";
+import type { DaySummary } from "../api";
 
 type Point = { time: string; value: number };
 
 function formatKw(n: number): string {
   return `${n.toFixed(2)} kW`;
+}
+
+function formatKwh(n: number | null | undefined): string {
+  if (n == null || Number.isNaN(n)) return "—";
+  return `${n.toFixed(2)} kWh`;
 }
 
 export function Overview({
@@ -44,7 +50,73 @@ export function Overview({
   );
 }
 
-export function DayChart({ points }: { points: Point[] }) {
+export function TodayEnergy({ summary }: { summary: DaySummary | null }) {
+  const gridLabel =
+    summary?.grid_direction === "export"
+      ? "Exported to grid"
+      : summary?.grid_direction === "import"
+        ? "Imported from grid"
+        : "Grid net";
+
+  return (
+    <section className="section">
+      <h2>Today ({summary?.local_date ?? "…"})</h2>
+      <div className="flow">
+        <article className="stat solar">
+          <div className="label">Generated</div>
+          <div className="value">
+            {summary?.generated_insufficient_samples
+              ? "…"
+              : formatKwh(summary?.generated_kwh)}
+          </div>
+          <div className="meta">
+            Calendar day · {summary?.timezone ?? "America/Chicago"} · measured delta
+          </div>
+        </article>
+        <article
+          className={`stat grid ${
+            summary?.grid_direction === "export"
+              ? "export"
+              : summary?.grid_direction === "import"
+                ? "import"
+                : ""
+          }`}
+        >
+          <div className="label">{gridLabel}</div>
+          <div className="value">
+            {summary?.grid_insufficient_samples
+              ? "…"
+              : formatKwh(summary?.grid_kwh)}
+          </div>
+          <div className="meta">
+            {summary?.grid_direction === "export"
+              ? "Net to utility today"
+              : summary?.grid_direction === "import"
+                ? "Net from utility today"
+                : "Needs more samples today"}
+          </div>
+        </article>
+        <article className="stat load">
+          <div className="label">Home use</div>
+          <div className="value">
+            {summary?.home_load_insufficient_samples
+              ? "…"
+              : formatKwh(summary?.home_load_kwh)}
+          </div>
+          <div className="meta">Site load energy today</div>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+export function DayChart({
+  points,
+  hours,
+}: {
+  points: Point[];
+  hours: number;
+}) {
   const { path, area, maxY, labels } = useMemo(() => {
     if (points.length === 0) {
       return { path: "", area: "", maxY: 1, labels: [] as string[] };
@@ -59,22 +131,47 @@ export function DayChart({ points }: { points: Point[] }) {
       const y = h - pad - (p.value / maxY) * (h - pad * 2);
       return [x, y] as const;
     });
-    const path = coords.map((c, i) => `${i === 0 ? "M" : "L"}${c[0].toFixed(1)},${c[1].toFixed(1)}`).join(" ");
+    const path = coords
+      .map((c, i) => `${i === 0 ? "M" : "L"}${c[0].toFixed(1)},${c[1].toFixed(1)}`)
+      .join(" ");
     const area = `${path} L${coords.at(-1)![0].toFixed(1)},${h - pad} L${coords[0][0].toFixed(1)},${h - pad} Z`;
+    const fmt = (iso: string) => {
+      const d = new Date(iso);
+      if (hours > 48) {
+        return d.toLocaleString([], { month: "short", day: "numeric", hour: "numeric" });
+      }
+      return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    };
     const labels = [
-      new Date(points[0].time).toLocaleTimeString([], { hour: "numeric" }),
-      new Date(points[Math.floor(points.length / 2)].time).toLocaleTimeString([], { hour: "numeric" }),
-      new Date(points.at(-1)!.time).toLocaleTimeString([], { hour: "numeric" }),
+      fmt(points[0].time),
+      fmt(points[Math.floor(points.length / 2)].time),
+      fmt(points.at(-1)!.time),
     ];
     return { path, area, maxY, labels };
-  }, [points]);
+  }, [points, hours]);
+
+  const spanHours =
+    points.length >= 2
+      ? (new Date(points.at(-1)!.time).getTime() - new Date(points[0].time).getTime()) /
+        3_600_000
+      : 0;
 
   return (
     <section className="section">
-      <h2>Day chart</h2>
+      <h2>Production chart</h2>
       <div className="panel chart-wrap">
+        <p className="muted" style={{ marginTop: 0 }}>
+          Requested window: last {hours === 168 ? "7 days" : `${hours} hours`} · {points.length}{" "}
+          point{points.length === 1 ? "" : "s"}
+          {points.length >= 2
+            ? ` · data spans ~${spanHours.toFixed(1)} h (chart only shows samples we have stored)`
+            : ""}
+        </p>
         {points.length < 2 ? (
-          <p className="muted">Not enough history yet. The collector adds points every poll interval.</p>
+          <p className="muted">
+            Not enough history yet. The collector stores one sample every poll (~5 min). Longer
+            ranges will look the same until more time has accumulated.
+          </p>
         ) : (
           <svg viewBox="0 0 640 240" role="img" aria-label="Solar production over time">
             <defs>
@@ -84,7 +181,13 @@ export function DayChart({ points }: { points: Point[] }) {
               </linearGradient>
             </defs>
             <path d={area} fill="url(#fillGrad)" />
-            <path d={path} fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinejoin="round" />
+            <path
+              d={path}
+              fill="none"
+              stroke="var(--accent)"
+              strokeWidth="2.5"
+              strokeLinejoin="round"
+            />
             <text x="16" y="18" fill="var(--muted)" fontSize="12">
               max {maxY.toFixed(2)} kW
             </text>

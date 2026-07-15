@@ -6,10 +6,14 @@ import {
   readCachedCurrent,
   setApiToken,
   type CurrentResponse,
+  type DaySummary,
   type Device,
   type HealthResponse,
+  type PlaybackResponse,
 } from "./api";
-import { DayChart, Overview } from "./components/Overview";
+import { DayChart, Overview, TodayEnergy } from "./components/Overview";
+import { DayScrubber } from "./components/DayScrubber";
+import { PowerFlow } from "./components/PowerFlow";
 import { Heatmap } from "./components/Heatmap";
 import "./styles.css";
 
@@ -40,11 +44,15 @@ export default function App() {
   });
   const [current, setCurrent] = useState<CurrentResponse | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [daySummary, setDaySummary] = useState<DaySummary | null>(null);
+  const [playback, setPlayback] = useState<PlaybackResponse | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [history, setHistory] = useState<Array<{ time: string; value: number }>>([]);
   const [hours, setHours] = useState(24);
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [csvBusy, setCsvBusy] = useState(false);
   const [tokenInput, setTokenInput] = useState(getApiToken());
 
   useEffect(() => {
@@ -53,18 +61,23 @@ export default function App() {
   }, [theme]);
 
   const refresh = useCallback(async () => {
+    setRefreshing(true);
     try {
-      const [h, c, d, hist] = await Promise.all([
+      const [h, c, d, hist, day, play] = await Promise.all([
         api.health(),
         api.current(),
         api.devices(),
         api.history("pv_power_kw", hours),
+        api.daySummary(),
+        api.playback(24),
       ]);
       setHealth(h);
       setCurrent(c);
       cacheCurrent(c);
       setDevices(d.devices);
       setHistory(hist.points.map((p) => ({ time: p.time, value: p.value })));
+      setDaySummary(day);
+      setPlayback(play);
       setError(null);
       setOffline(false);
     } catch (err) {
@@ -74,6 +87,8 @@ export default function App() {
         setOffline(true);
       }
       setError(err instanceof Error ? err.message : "Failed to load");
+    } finally {
+      setRefreshing(false);
     }
   }, [hours]);
 
@@ -97,6 +112,18 @@ export default function App() {
       : offline
         ? "warn"
         : "ok";
+
+  async function onDownloadCsv() {
+    setCsvBusy(true);
+    setError(null);
+    try {
+      await api.downloadCsv(hours);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "CSV download failed");
+    } finally {
+      setCsvBusy(false);
+    }
+  }
 
   return (
     <div className="app">
@@ -132,13 +159,26 @@ export default function App() {
           </span>
           <span className="pill">Data {freshness}</span>
           <span className="pill">{health?.inverter_devices ?? "—"} inverters tracked</span>
-          <button type="button" className="icon-btn" onClick={() => void refresh()}>
-            Refresh
+          <button
+            type="button"
+            className="icon-btn"
+            disabled={refreshing}
+            onClick={() => void refresh()}
+          >
+            {refreshing ? "Refreshing…" : "Refresh"}
           </button>
         </div>
       </section>
 
       <Overview
+        pv={metricValue(current, "pv_power_kw")}
+        load={metricValue(current, "site_load_power_kw")}
+        net={metricValue(current, "net_power_kw")}
+      />
+
+      <TodayEnergy summary={daySummary} />
+
+      <PowerFlow
         pv={metricValue(current, "pv_power_kw")}
         load={metricValue(current, "site_load_power_kw")}
         net={metricValue(current, "net_power_kw")}
@@ -156,17 +196,19 @@ export default function App() {
               {h === 168 ? "7d" : `${h}h`}
             </button>
           ))}
-          <a className="button" href={api.exportCsvUrl(hours)}>
-            Download CSV
-          </a>
+          <button type="button" className="button" disabled={csvBusy} onClick={() => void onDownloadCsv()}>
+            {csvBusy ? "Downloading…" : "Download CSV"}
+          </button>
         </div>
       </section>
 
-      <DayChart points={history} />
+      <DayChart points={history} hours={hours} />
 
       {current && (
         <Heatmap current={current} devices={devices} onDevicesChange={setDevices} />
       )}
+
+      <DayScrubber playback={playback} devices={devices} />
 
       <section className="settings">
         <h2>API token (optional)</h2>

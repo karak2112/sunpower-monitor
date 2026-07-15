@@ -8,6 +8,9 @@ export default defineConfig({
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["favicon.svg"],
+      workbox: {
+        navigateFallbackDenylist: [/^\/api/],
+      },
       manifest: {
         name: "Solar Monitor",
         short_name: "Solar",

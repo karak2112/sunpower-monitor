@@ -147,6 +147,34 @@ async def patch_device_layout(
     return {"device": conv(row)}
 
 
+@app.get("/v1/day-summary", dependencies=[Depends(require_auth)])
+async def day_summary(repo: Annotated[Repository, Depends(get_repo)]) -> dict[str, Any]:
+    """Calendar-day production and grid net in the site timezone (America/Chicago)."""
+    return await repo.day_energy_summary(timezone_name="America/Chicago")
+
+
+@app.get("/v1/playback", dependencies=[Depends(require_auth)])
+async def playback(
+    repo: Annotated[Repository, Depends(get_repo)],
+    hours: int = Query(24, ge=1, le=24 * 7),
+) -> dict[str, Any]:
+    """Inverter power frames for heatmap time-lapse scrubbing."""
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(hours=hours)
+    data = await repo.inverter_playback(start=start, end=end)
+
+    def conv(obj: Any) -> Any:
+        if isinstance(obj, list):
+            return [conv(x) for x in obj]
+        if isinstance(obj, dict):
+            return {k: conv(v) for k, v in obj.items()}
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return obj
+
+    return conv(data)
+
+
 @app.get("/v1/history", dependencies=[Depends(require_auth)])
 async def history(
     repo: Annotated[Repository, Depends(get_repo)],

@@ -30,8 +30,8 @@ See also [adr/0002-measurement-schema.md](adr/0002-measurement-schema.md).
 
 Quality is `measured` for varserver/fixture samples. Estimated values must be labeled if added later.
 
-## Site profile
+## Data retention
 
-- 44 × 360 W microinverters (`rated_watts=360` on ingest)
-- Production meter `PVS6M0400p` (index 0) and consumption meter `PVS6M0400c` (index 1)
-- No battery
+Configured intent in `.env.example`: `MEASUREMENT_RETENTION_DAYS=1825` (~5 years). **Automated purge is not implemented yet**, so samples currently remain until you delete them or free disk space. Stored values do **not** degrade or downsample over time today—each poll keeps full precision.
+
+When retention jobs are added, older raw high-resolution points may be downsampled to hourly/daily aggregates; that change will be documented in an ADR.

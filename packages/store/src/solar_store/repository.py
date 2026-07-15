@@ -188,6 +188,177 @@ class Repository:
             )
         return dict(row) if row else None
 
+    async def inverter_playback(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        limit: int = 50000,
+    ) -> dict[str, Any]:
+        """Time-ordered inverter power samples for heatmap playback."""
+        if limit > 100000:
+            limit = 100000
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT m.time, d.pvs_path_id, m.value AS power_kw
+                FROM measurements m
+                JOIN devices d ON d.id = m.device_id
+                WHERE d.site_id = $1::uuid
+                  AND d.device_type = 'inverter'
+                  AND m.metric = 'power_kw'
+                  AND m.time >= $2
+                  AND m.time < $3
+                ORDER BY m.time ASC, (d.pvs_path_id)::int ASC
+                LIMIT $4
+                """,
+                HOME_SITE_ID,
+                start,
+                end,
+                limit,
+            )
+            devices = await conn.fetch(
+                """
+                SELECT pvs_path_id, name, grid_row, grid_col
+                FROM devices
+                WHERE site_id = $1::uuid AND device_type = 'inverter'
+                ORDER BY (pvs_path_id)::int
+                """,
+                HOME_SITE_ID,
+            )
+
+        frames_map: dict[str, dict[str, float]] = {}
+        max_kw = 0.0
+        for r in rows:
+            key = r["time"].isoformat()
+            bucket = frames_map.setdefault(key, {})
+            val = float(r["power_kw"])
+            bucket[str(r["pvs_path_id"])] = val
+            if val > max_kw:
+                max_kw = val
+
+        frames = [{"time": t, "powers": powers} for t, powers in frames_map.items()]
+        return {
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "frame_count": len(frames),
+            "max_kw": max_kw,
+            "devices": [dict(d) for d in devices],
+            "frames": frames,
+        }
+
+    async def day_energy_summary(
+        self,
+        *,
+        timezone_name: str = "America/Chicago",
+    ) -> dict[str, Any]:
+        """Calendar-day energy from cumulative counters (measured deltas)."""
+        from datetime import time as time_of_day
+        from datetime import timezone as tz_utc
+        from zoneinfo import ZoneInfo
+
+        zone = ZoneInfo(timezone_name)
+        now_local = datetime.now(zone)
+        day_start_local = datetime.combine(now_local.date(), time_of_day.min, tzinfo=zone)
+        start = day_start_local.astimezone(tz_utc.utc)
+        end = now_local.astimezone(tz_utc.utc)
+
+        async with self._pool.acquire() as conn:
+            first_rows = await conn.fetch(
+                """
+                SELECT DISTINCT ON (m.metric)
+                    m.metric, m.value, m.time, m.unit
+                FROM measurements m
+                JOIN devices d ON d.id = m.device_id
+                WHERE d.site_id = $1::uuid
+                  AND d.device_type = 'site'
+                  AND d.pvs_path_id = 'livedata'
+                  AND m.metric IN ('pv_energy_kwh', 'net_energy_kwh', 'site_load_energy_kwh')
+                  AND m.time >= $2
+                  AND m.time <= $3
+                ORDER BY m.metric, m.time ASC
+                """,
+                HOME_SITE_ID,
+                start,
+                end,
+            )
+            last_rows = await conn.fetch(
+                """
+                SELECT DISTINCT ON (m.metric)
+                    m.metric, m.value, m.time, m.unit
+                FROM measurements m
+                JOIN devices d ON d.id = m.device_id
+                WHERE d.site_id = $1::uuid
+                  AND d.device_type = 'site'
+                  AND d.pvs_path_id = 'livedata'
+                  AND m.metric IN ('pv_energy_kwh', 'net_energy_kwh', 'site_load_energy_kwh')
+                  AND m.time >= $2
+                  AND m.time <= $3
+                ORDER BY m.metric, m.time DESC
+                """,
+                HOME_SITE_ID,
+                start,
+                end,
+            )
+
+        first_map = {r["metric"]: r for r in first_rows}
+        last_map = {r["metric"]: r for r in last_rows}
+
+        def delta(metric: str) -> dict[str, Any] | None:
+            a = first_map.get(metric)
+            b = last_map.get(metric)
+            if not a or not b:
+                return None
+            if a["time"] == b["time"]:
+                return {
+                    "kwh": 0.0,
+                    "insufficient_samples": True,
+                    "first_at": a["time"].isoformat(),
+                    "last_at": b["time"].isoformat(),
+                }
+            return {
+                "kwh": float(b["value"]) - float(a["value"]),
+                "insufficient_samples": False,
+                "first_at": a["time"].isoformat(),
+                "last_at": b["time"].isoformat(),
+            }
+
+        pv = delta("pv_energy_kwh")
+        net = delta("net_energy_kwh")
+        load = delta("site_load_energy_kwh")
+
+        # Sign convention observed on this site: negative net power => export.
+        # A negative net_energy delta therefore means exported to grid today.
+        grid_kwh = None
+        grid_direction = None
+        if net and not net.get("insufficient_samples"):
+            raw = float(net["kwh"])
+            if raw < 0:
+                grid_kwh = abs(raw)
+                grid_direction = "export"
+            elif raw > 0:
+                grid_kwh = raw
+                grid_direction = "import"
+            else:
+                grid_kwh = 0.0
+                grid_direction = "neutral"
+
+        return {
+            "timezone": timezone_name,
+            "local_date": now_local.date().isoformat(),
+            "window_start": start.isoformat(),
+            "window_end": end.isoformat(),
+            "generated_kwh": None if not pv else max(0.0, float(pv["kwh"])),
+            "generated_insufficient_samples": bool(pv and pv.get("insufficient_samples")),
+            "grid_kwh": grid_kwh,
+            "grid_direction": grid_direction,
+            "grid_insufficient_samples": bool(net and net.get("insufficient_samples")),
+            "home_load_kwh": None if not load else max(0.0, float(load["kwh"])),
+            "home_load_insufficient_samples": bool(load and load.get("insufficient_samples")),
+            "quality": "measured",
+            "method": "cumulative_counter_delta",
+        }
+
     async def record_collector_run(
         self,
         *,

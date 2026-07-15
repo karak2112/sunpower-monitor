@@ -13,9 +13,9 @@
   --accent-2: #2f6f7a;
   --grid-import: #3d6ea8;
   --grid-export: #2f6f7a;
-  --heat-low: #3d5a80;
-  --heat-mid: #e0a100;
-  --heat-high: #f5f0e1;
+  --heat-low: #6c36a8;
+  --heat-mid: #2e8ca0;
+  --heat-high: #2ea05a;
   --ok: #2f6f7a;
   --warn: #b86a00;
   --bad: #9b3b2e;
@@ -33,9 +33,9 @@ html[data-theme="dark"] {
   --accent-2: #6eb8c2;
   --grid-import: #7eb0e0;
   --grid-export: #6eb8c2;
-  --heat-low: #2a4058;
-  --heat-mid: #d4920a;
-  --heat-high: #f6e7c2;
+  --heat-low: #7b4ec4;
+  --heat-mid: #3aa8b8;
+  --heat-high: #3cb86a;
   --ok: #6eb8c2;
   --warn: #e8a317;
   --bad: #e07a6c;
@@ -69,9 +69,9 @@ input {
 }
 
 .app {
-  width: min(960px, 100%);
+  width: min(1320px, 100%);
   margin: 0 auto;
-  padding: 1.25rem 1rem 3rem;
+  padding: 1.25rem 1.25rem 3rem;
 }
 
 .topbar {
@@ -204,12 +204,18 @@ input {
   border: 1px solid var(--line);
   display: grid;
   place-items: center;
-  font-size: 0.65rem;
-  font-weight: 600;
-  color: var(--ink);
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #1a1a1a;
   cursor: pointer;
   transition: transform 120ms ease, outline 120ms ease;
   position: relative;
+  padding: 0.15rem;
+}
+
+.cell.light-text {
+  color: #f7f4ff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
 .cell:hover,
@@ -225,8 +231,16 @@ input {
 }
 
 .cell .w {
-  font-size: 0.7rem;
+  font-size: clamp(0.75rem, 2.4vw, 0.95rem);
   font-weight: 700;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.cell .unit {
+  font-size: 0.65em;
+  font-weight: 600;
+  opacity: 0.9;
 }
 
 .legend {
@@ -245,6 +259,10 @@ input {
   background: linear-gradient(90deg, var(--heat-low), var(--heat-mid), var(--heat-high));
 }
 
+.legend-bar-violet-green {
+  background: linear-gradient(90deg, #6c36a8, #2e8ca0, #2ea05a);
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -253,7 +271,8 @@ input {
 }
 
 .toolbar button,
-.toolbar a.button {
+.toolbar a.button,
+.toolbar button.button {
   border: 1px solid var(--line);
   background: transparent;
   color: var(--ink);
@@ -261,6 +280,11 @@ input {
   padding: 0.45rem 0.85rem;
   text-decoration: none;
   cursor: pointer;
+}
+
+.toolbar button:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .toolbar button.active {
@@ -364,4 +388,151 @@ input {
   background: var(--panel);
   color: var(--ink);
   padding: 0.5rem 0.7rem;
+}
+
+.scrubber-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+  margin-bottom: 0.85rem;
+}
+
+.scrubber-range {
+  flex: 1 1 12rem;
+  min-width: 8rem;
+  accent-color: var(--accent-2);
+}
+
+.scrubber-time {
+  font-size: 0.85rem;
+  flex: 1 1 100%;
+}
+
+@media (min-width: 640px) {
+  .scrubber-time {
+    flex: 0 1 auto;
+    white-space: nowrap;
+  }
+}
+
+.power-flow-panel {
+  overflow: hidden;
+}
+
+.power-flow-stage {
+  position: relative;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0.25rem auto 0;
+  aspect-ratio: 16 / 9;
+  border-radius: 1rem;
+  overflow: hidden;
+  background: #f3eee6;
+}
+
+.power-flow-scene {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  user-select: none;
+  pointer-events: none;
+}
+
+.power-flow-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.flow-dash {
+  stroke-dasharray: 22 16;
+  animation-name: flow-dash-move;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+.flow-dash-outer {
+  stroke-dasharray: 10 28;
+}
+
+@keyframes flow-dash-move {
+  to {
+    stroke-dashoffset: -76;
+  }
+}
+
+.flow-badge {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 0.75rem;
+  background: rgba(255, 252, 247, 0.94);
+  border: 1px solid rgba(28, 36, 48, 0.12);
+  box-shadow: 0 8px 20px rgba(28, 36, 48, 0.08);
+  backdrop-filter: blur(6px);
+  line-height: 1.15;
+  text-align: center;
+}
+
+.flow-badge-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.flow-badge-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1c2430;
+}
+
+.flow-badge-value.solar {
+  color: #c47b12;
+}
+
+.flow-badge-value.home {
+  color: #111827;
+}
+
+.flow-badge-grid.export .flow-badge-value,
+.flow-badge-grid.import .flow-badge-value {
+  color: #2f9e3a;
+}
+
+/* Centered above the upper (solar) arc */
+.flow-badge-solar {
+  top: 3%;
+  left: 58%;
+  transform: translateX(-50%);
+}
+
+/* Just left of the arc junction — similar clearance as the other badges */
+.flow-badge-home {
+  left: 26%;
+  top: 48%;
+  transform: translateY(-50%);
+  text-align: left;
+}
+
+/* Same horizontal center as solar; raised to match solar’s distance from its arc */
+.flow-badge-grid {
+  left: 58%;
+  top: auto;
+  bottom: 14%;
+  transform: translateX(-50%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .power-flow-overlay .flow-dash {
+    animation: none !important;
+  }
 }

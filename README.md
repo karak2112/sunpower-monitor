@@ -204,10 +204,21 @@ docker-compose.yml
 - Cloud API is authenticated (Bearer); ingest uses a separate sync token.
 - See [SECURITY.md](SECURITY.md) and [docs/polling-safety.md](docs/polling-safety.md).
 
+## Publishing a release (v1.0+)
+
+Docker images ship from CI on a `v*` tag; the **signed APK is built on your PC** with your upload keystore (never uploaded to Actions secrets).
+
+```powershell
+.\scripts\publish-release.ps1 -Version 1.0.0
+```
+
+Details: [docs/releasing.md](docs/releasing.md).
+
 ## Documentation
 
 | Doc | Purpose |
 |-----|---------|
+| [docs/releasing.md](docs/releasing.md) | Tag release, GHCR images, local signed APK |
 | [docs/architecture.md](docs/architecture.md) | System design |
 | [docs/data-model.md](docs/data-model.md) | Schema and metrics |
 | [docs/remote-access.md](docs/remote-access.md) | Mobile / cloud access overview |

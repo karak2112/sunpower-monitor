@@ -12,6 +12,7 @@ This project collects telemetry from **your own** PVS6 on **your own** LAN, stor
 |-------|--------|
 | Web UI (PWA) | http://127.0.0.1:3080 |
 | API | http://127.0.0.1:8000 (`/health`, `/v1/*`) |
+| Android | [`apps/android`](apps/android/) (Tailscale for off-home) |
 | Database | TimescaleDB on port 5432 |
 | Collector | Docker service; poll interval **300s** |
 
@@ -35,10 +36,10 @@ Compose defaults to **fixture** replay (safe, no PVS contact). Live collection u
 ```
 PVS6 (LAN) → Python collector (read-only) → TimescaleDB
                                               ↑
-                         PWA / phone  ←  FastAPI
+                         PWA / Android  ←  FastAPI (LAN or Tailscale)
 ```
 
-See [docs/architecture.md](docs/architecture.md) and [docs/adr/](docs/adr/).
+Remote phone access: DigitalOcean read replica — [docs/cloud-droplet-setup.md](docs/cloud-droplet-setup.md), deploy/update — [docs/cloud-deploy.md](docs/cloud-deploy.md). Overview: [docs/remote-access.md](docs/remote-access.md).
 
 ## Quick start
 

@@ -1,3 +1,5 @@
-# Placeholder — native mobile (post-MVP)
+# Native mobile
 
-Deferred. MVP uses the PWA under `apps/web`.
+Active Android client: [`apps/android`](../android/).
+
+This folder remains a placeholder for any future non-Android native work. The MVP web UI is still [`apps/web`](../web/).

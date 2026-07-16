@@ -86,5 +86,24 @@ services:
       api:
         condition: service_healthy
 
+  cloud-sync:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.cloud-sync
+    profiles: ["cloud-sync"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-solar}:${POSTGRES_PASSWORD:-change-me-locally}@db:5432/${POSTGRES_DB:-solar_monitor}
+      CLOUD_SYNC_URL: ${CLOUD_SYNC_URL:-https://solar.blackmagicsoftware.net}
+      CLOUD_SYNC_TOKEN: ${CLOUD_SYNC_TOKEN:-}
+      CLOUD_SYNC_INTERVAL_SECONDS: ${CLOUD_SYNC_INTERVAL_SECONDS:-300}
+      CLOUD_SYNC_HISTORY_HOURS: ${CLOUD_SYNC_HISTORY_HOURS:-48}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   solar_pgdata:

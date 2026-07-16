@@ -25,10 +25,19 @@ docs/discovery/private/**
 *.raw.json
 *.redact-me.json
 
-# Proprietary app packages
+# Android
+apps/android/local.properties
+apps/android/key.properties
+apps/android/.gradle/
+apps/android/**/build/
+apps/android/captures/
 *.apk
-*.ipa
 *.aab
+*.jks
+*.keystore
+
+# Proprietary app packages
+*.ipa
 
 # Python
 __pycache__/

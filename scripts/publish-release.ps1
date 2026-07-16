@@ -45,6 +45,10 @@ function Assert-Command([string]$Name) {
     }
 }
 
+function Write-DryRun([string]$Message) {
+    Write-Host ('[dry-run] ' + $Message)
+}
+
 Assert-Command git
 Assert-Command gh
 
@@ -57,7 +61,7 @@ try {
     }
 
     if (-not (Test-Path $KeyProps)) {
-        throw "Missing $KeyProps — copy key.properties.example and fill in your keystore values."
+        throw "Missing $KeyProps - copy key.properties.example and fill in your keystore values."
     }
 
     if (-not $SkipBuild) {
@@ -71,7 +75,7 @@ try {
         Push-Location $AndroidDir
         try {
             if ($DryRun) {
-                Write-Host "[dry-run] would run: .\gradlew.bat :app:assembleRelease"
+                Write-DryRun 'would run: .\gradlew.bat :app:assembleRelease'
             }
             else {
                 & .\gradlew.bat :app:assembleRelease
@@ -97,7 +101,7 @@ try {
     if (-not $tagExists) {
         Write-Host "==> Creating annotated tag $Tag"
         if ($DryRun) {
-            Write-Host "[dry-run] git tag -a $Tag -m `"Solar Monitor $Tag`""
+            Write-DryRun "git tag -a $Tag -m 'Solar Monitor $Tag'"
         }
         else {
             git tag -a $Tag -m "Solar Monitor $Tag"
@@ -109,7 +113,7 @@ try {
 
     Write-Host "==> Pushing tag $Tag (starts GHCR image workflow)"
     if ($DryRun) {
-        Write-Host "[dry-run] git push origin $Tag"
+        Write-DryRun "git push origin $Tag"
     }
     else {
         git push origin $Tag
@@ -122,13 +126,13 @@ try {
 
 Signed Android APK attached from a local keystore build.
 
-Docker images are published by GitHub Actions to GHCR (``solar-monitor-*:$Version``). Refresh this page after the Release workflow finishes for the image list.
+Docker images are published by GitHub Actions to GHCR (solar-monitor-*:$Version). Refresh this page after the Release workflow finishes for the image list.
 
 See docs/releasing.md.
 "@
 
     if ($DryRun) {
-        Write-Host "[dry-run] gh release create/upload $Tag -> $ApkReleaseName"
+        Write-DryRun "gh release create/upload $Tag -> $ApkReleaseName"
         Write-Host $notes
         return
     }
@@ -138,7 +142,7 @@ See docs/releasing.md.
     if ($LASTEXITCODE -eq 0) { $releaseExists = $true }
 
     if ($releaseExists) {
-        Write-Host "Release $Tag exists — uploading APK (clobber if present)"
+        Write-Host "Release $Tag exists - uploading APK (clobber if present)"
         gh release upload $Tag $ApkStaged --clobber
         if ($LASTEXITCODE -ne 0) { throw "gh release upload failed" }
     }
